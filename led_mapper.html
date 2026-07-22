@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LED Position Mapper - BARRACKS</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a1a; color: #eee; font-family: system-ui, sans-serif; }
+
+  #toolbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: #222; padding: 10px 20px; display: flex; align-items: center; gap: 15px;
+    border-bottom: 1px solid #444;
+  }
+  #toolbar label { font-size: 14px; }
+  #toolbar select, #toolbar button, #toolbar input {
+    padding: 6px 12px; border-radius: 4px; border: 1px solid #555;
+    background: #333; color: #eee; font-size: 14px; cursor: pointer;
+  }
+  #toolbar button:hover { background: #444; }
+  #toolbar button.active { background: #0066cc; border-color: #0088ff; }
+  #toolbar .separator { width: 1px; height: 24px; background: #555; }
+
+  #canvas-area {
+    margin-top: 50px; display: flex; justify-content: center; padding: 20px;
+    overflow: auto;
+  }
+
+  #svg-container {
+    position: relative; display: inline-block; background: #111;
+    border: 1px solid #333; cursor: crosshair;
+  }
+
+  #svg-container svg { display: block; }
+
+  .led-point {
+    position: absolute; width: 14px; height: 14px; border-radius: 50%;
+    transform: translate(-50%, -50%); cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.8);
+    transition: box-shadow 0.15s;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; font-weight: bold; color: #000;
+  }
+  .led-point:hover {
+    box-shadow: 0 0 10px rgba(255,255,255,0.5);
+    z-index: 10;
+  }
+  .led-point.selected {
+    box-shadow: 0 0 12px rgba(255,255,0,0.8);
+    border-color: yellow;
+  }
+
+  #sidebar {
+    position: fixed; right: 0; top: 50px; bottom: 0; width: 320px;
+    background: #222; border-left: 1px solid #444; padding: 15px;
+    overflow-y: auto; font-size: 13px;
+  }
+  #sidebar h3 { margin-bottom: 10px; }
+  #sidebar table { width: 100%; border-collapse: collapse; }
+  #sidebar th, #sidebar td { padding: 4px 6px; text-align: left; border-bottom: 1px solid #333; }
+  #sidebar th { color: #aaa; }
+  #sidebar td.actions button { padding: 2px 6px; font-size: 11px; }
+
+  #json-output {
+    margin-top: 15px; width: 100%; min-height: 120px; background: #111;
+    color: #0f0; border: 1px solid #444; border-radius: 4px;
+    padding: 8px; font-family: monospace; font-size: 11px; resize: vertical;
+  }
+
+  .letter-color-b { background: #ff4444; }
+  .letter-color-a { background: #ff8800; }
+  .letter-color-r1 { background: #ffcc00; }
+  .letter-color-r2 { background: #44cc44; }
+  .letter-color-a2 { background: #4488ff; }
+  .letter-color-c { background: #8844ff; }
+  .letter-color-k { background: #ff44cc; }
+  .letter-color-s { background: #44cccc; }
+
+  #instructions {
+    position: fixed; bottom: 0; left: 0; right: 320px;
+    background: #222; border-top: 1px solid #444; padding: 8px 20px;
+    font-size: 12px; color: #aaa;
+  }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <label>Letter:</label>
+  <select id="letter-select">
+    <option value="b">B</option>
+    <option value="a">A (1st)</option>
+    <option value="r1">R (1st)</option>
+    <option value="r2">R (2nd)</option>
+    <option value="a2">A (2nd)</option>
+    <option value="c">C</option>
+    <option value="k">K</option>
+    <option value="s">S</option>
+  </select>
+  <div class="separator"></div>
+  <button id="btn-place" class="active">Place LEDs</button>
+  <button id="btn-delete">Delete Mode</button>
+  <button id="btn-reorder">Reorder Mode</button>
+  <div class="separator"></div>
+  <button id="btn-undo">Undo</button>
+  <button id="btn-clear-letter">Clear Letter</button>
+  <button id="btn-export">Export JSON</button>
+  <button id="btn-import">Import JSON</button>
+  <div class="separator"></div>
+  <label>Zoom:</label>
+  <input type="range" id="zoom" min="0.5" max="3" step="0.1" value="1.5">
+  <span id="zoom-val">1.5x</span>
+</div>
+
+<div id="canvas-area">
+  <div id="svg-container"></div>
+</div>
+
+<div id="sidebar">
+  <h3>LED Points</h3>
+  <div id="letter-summary"></div>
+  <hr style="border-color:#444; margin: 10px 0;">
+  <h3>Current Letter: <span id="current-letter-name">B</span></h3>
+  <table>
+    <thead><tr><th>#</th><th>X</th><th>Y</th><th></th></tr></thead>
+    <tbody id="led-table"></tbody>
+  </table>
+  <hr style="border-color:#444; margin: 10px 0;">
+  <h3>Export</h3>
+  <textarea id="json-output" readonly></textarea>
+</div>
+
+<div id="instructions">
+  <b>Click</b> on the SVG to place LEDs for the selected letter. <b>Right-click</b> an LED to delete it.
+  Place them in the order they're wired on the strip. Use <b>Reorder Mode</b> to click LEDs in the correct sequence.
+  If the font doesn't render, see instructions below the SVG.
+</div>
+
+<script>
+const LETTERS = {
+  b:  { name: 'B',        color: '#ff4444',  class: 'letter-color-b' },
+  a:  { name: 'A (1st)',   color: '#ff8800',  class: 'letter-color-a' },
+  r1: { name: 'R (1st)',   color: '#ffcc00',  class: 'letter-color-r1' },
+  r2: { name: 'R (2nd)',   color: '#44cc44',  class: 'letter-color-r2' },
+  a2: { name: 'A (2nd)',   color: '#4488ff',  class: 'letter-color-a2' },
+  c:  { name: 'C',         color: '#8844ff',  class: 'letter-color-c' },
+  k:  { name: 'K',         color: '#ff44cc',  class: 'letter-color-k' },
+  s:  { name: 'S',         color: '#44cccc',  class: 'letter-color-s' },
+};
+
+// State
+let ledData = {};
+Object.keys(LETTERS).forEach(k => ledData[k] = []);
+let currentLetter = 'b';
+let mode = 'place'; // place, delete, reorder
+let reorderBuffer = [];
+let undoStack = [];
+let zoom = 1.5;
+
+// Load SVG
+const svgContainer = document.getElementById('svg-container');
+
+const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="1056" height="816" viewBox="0 0 1056 816">
+  <rect width="1056" height="816" fill="#111"/>
+  <text x="1.44" y="481.1" font-size="266.667" font-family="Blockletter, Impact, 'Arial Black', sans-serif" fill="#333">barracks</text>
+</svg>`;
+svgContainer.innerHTML = svgContent;
+
+const svgEl = svgContainer.querySelector('svg');
+applyZoom();
+
+// Zoom
+const zoomSlider = document.getElementById('zoom');
+const zoomVal = document.getElementById('zoom-val');
+zoomSlider.addEventListener('input', () => {
+  zoom = parseFloat(zoomSlider.value);
+  zoomVal.textContent = zoom.toFixed(1) + 'x';
+  applyZoom();
+  rerenderPoints();
+});
+
+function applyZoom() {
+  svgEl.style.width = (1056 * zoom) + 'px';
+  svgEl.style.height = (816 * zoom) + 'px';
+}
+
+// Mode buttons
+document.getElementById('btn-place').addEventListener('click', () => setMode('place'));
+document.getElementById('btn-delete').addEventListener('click', () => setMode('delete'));
+document.getElementById('btn-reorder').addEventListener('click', () => setMode('reorder'));
+
+function setMode(m) {
+  mode = m;
+  reorderBuffer = [];
+  document.getElementById('btn-place').classList.toggle('active', m === 'place');
+  document.getElementById('btn-delete').classList.toggle('active', m === 'delete');
+  document.getElementById('btn-reorder').classList.toggle('active', m === 'reorder');
+  svgContainer.style.cursor = m === 'place' ? 'crosshair' : m === 'delete' ? 'not-allowed' : 'pointer';
+}
+
+// Letter select
+const letterSelect = document.getElementById('letter-select');
+letterSelect.addEventListener('change', () => {
+  currentLetter = letterSelect.value;
+  document.getElementById('current-letter-name').textContent = LETTERS[currentLetter].name;
+  reorderBuffer = [];
+  updateUI();
+});
+
+// Place LEDs on click
+svgContainer.addEventListener('click', (e) => {
+  if (e.target.classList.contains('led-point')) return;
+  if (mode !== 'place') return;
+
+  const rect = svgContainer.getBoundingClientRect();
+  const px = e.clientX - rect.left;
+  const py = e.clientY - rect.top;
+  // Convert to SVG coords
+  const svgX = px / zoom;
+  const svgY = py / zoom;
+
+  saveUndo();
+  ledData[currentLetter].push({ x: Math.round(svgX * 10) / 10, y: Math.round(svgY * 10) / 10 });
+  updateUI();
+});
+
+// Right-click to delete
+svgContainer.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  // Find closest LED point
+  if (e.target.classList.contains('led-point')) {
+    const letter = e.target.dataset.letter;
+    const idx = parseInt(e.target.dataset.index);
+    saveUndo();
+    ledData[letter].splice(idx, 1);
+    updateUI();
+  }
+});
+
+// Undo
+document.getElementById('btn-undo').addEventListener('click', () => {
+  if (undoStack.length === 0) return;
+  ledData = undoStack.pop();
+  updateUI();
+});
+
+function saveUndo() {
+  undoStack.push(JSON.parse(JSON.stringify(ledData)));
+  if (undoStack.length > 50) undoStack.shift();
+}
+
+// Clear letter
+document.getElementById('btn-clear-letter').addEventListener('click', () => {
+  if (ledData[currentLetter].length === 0) return;
+  saveUndo();
+  ledData[currentLetter] = [];
+  updateUI();
+});
+
+// Export
+document.getElementById('btn-export').addEventListener('click', () => {
+  const json = JSON.stringify(ledData, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'led_positions.json';
+  a.click(); URL.revokeObjectURL(url);
+});
+
+// Import
+document.getElementById('btn-import').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json';
+  input.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        saveUndo();
+        const imported = JSON.parse(ev.target.result);
+        Object.keys(LETTERS).forEach(k => {
+          if (imported[k]) ledData[k] = imported[k];
+        });
+        updateUI();
+      } catch(err) { alert('Invalid JSON: ' + err.message); }
+    };
+    reader.readAsText(file);
+  });
+  input.click();
+});
+
+// Render
+function updateUI() {
+  rerenderPoints();
+  updateTable();
+  updateSummary();
+  updateJSON();
+}
+
+function rerenderPoints() {
+  // Remove existing points
+  svgContainer.querySelectorAll('.led-point').forEach(el => el.remove());
+
+  Object.keys(LETTERS).forEach(letter => {
+    ledData[letter].forEach((pt, idx) => {
+      const div = document.createElement('div');
+      div.className = 'led-point ' + LETTERS[letter].class;
+      div.style.left = (pt.x * zoom) + 'px';
+      div.style.top = (pt.y * zoom) + 'px';
+      div.dataset.letter = letter;
+      div.dataset.index = idx;
+      div.textContent = idx;
+      div.title = `${LETTERS[letter].name} #${idx} (${pt.x}, ${pt.y})`;
+
+      div.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (mode === 'delete') {
+          saveUndo();
+          ledData[letter].splice(idx, 1);
+          updateUI();
+        } else if (mode === 'reorder' && letter === currentLetter) {
+          div.classList.add('selected');
+          reorderBuffer.push(idx);
+          if (reorderBuffer.length === ledData[currentLetter].length) {
+            // Apply reorder
+            saveUndo();
+            const newArr = reorderBuffer.map(i => ledData[currentLetter][i]);
+            ledData[currentLetter] = newArr;
+            reorderBuffer = [];
+            setMode('place');
+            updateUI();
+          }
+        }
+      });
+
+      svgContainer.appendChild(div);
+    });
+  });
+}
+
+function updateTable() {
+  const tbody = document.getElementById('led-table');
+  tbody.innerHTML = '';
+  ledData[currentLetter].forEach((pt, idx) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${idx}</td><td>${pt.x}</td><td>${pt.y}</td><td class="actions"><button onclick="deleteLED(${idx})">x</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function updateSummary() {
+  const div = document.getElementById('letter-summary');
+  div.innerHTML = Object.keys(LETTERS).map(k =>
+    `<span style="color:${LETTERS[k].color}">${LETTERS[k].name}: ${ledData[k].length} LEDs</span>`
+  ).join(' &nbsp;|&nbsp; ');
+}
+
+function updateJSON() {
+  document.getElementById('json-output').value = JSON.stringify(ledData, null, 2);
+}
+
+window.deleteLED = function(idx) {
+  saveUndo();
+  ledData[currentLetter].splice(idx, 1);
+  updateUI();
+};
+
+// Init
+updateUI();
+</script>
+</body>
+</html>

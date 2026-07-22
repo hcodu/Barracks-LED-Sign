@@ -1,0 +1,6 @@
+cycle_effects.ps1
+CircuitPython/settings.toml
+CircuitPython/*.zip
+CircuitPython/*.uf2
+MicroPython/Firmware/
+MicroPython/config.json

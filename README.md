@@ -1,4 +1,4 @@
-# BARRACKS LED Sign
+# Barracks LED Sign
 
 <!-- TODO: Add hero photo of the completed sign -->
 ![BARRACKS Sign](placeholder-photo.jpg)

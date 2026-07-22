@@ -1,7 +1,7 @@
 # Barracks LED Sign
 
 <!-- TODO: Add hero photo of the completed sign -->
-![BARRACKS Sign](placeholder-photo.jpg)
+![BARRACKS Sign](sign.jpeg)
 
 A WiFi-controlled LED sign spelling **BARRACKS** using 498 individually addressable WS2812B NeoPixels, 3D printed letter housings, and a microcontroller running 14 animated lighting effects -- all controllable from any device on the network via a simple HTTP API.
 
